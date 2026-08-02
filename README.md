@@ -1,4 +1,4 @@
-# concrete57-rts-cinemasource-blocks
+# concrete-cms-rts-cinemasource-blocks
 
 Collection of blocks for interfacing with RTS POS and the Cinema Source (Webedia) API.
 
