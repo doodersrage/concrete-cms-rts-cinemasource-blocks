@@ -1,28 +1,23 @@
 <?php
-// this document just processes requests to RTS and does absolytely nothing else
-if($_POST['req']){
-	
-	$ch = curl_init();
-	$timeout = 10;
-	curl_setopt($ch, CURLOPT_SSLVERSION, 1);
-	curl_setopt($ch, CURLOPT_URL, 'https://72352.formovietickets.com/Data.ASP');
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-	curl_setopt($ch, CURLOPT_PORT, 2235);
-	curl_setopt($ch, CURLOPT_POST, true );
-	curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
-	// authenticate user
-	curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC ) ;
-	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-	curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-	//curl_setopt($ch, CURLOPT_USERPWD, 'test:test');
-	curl_setopt($ch, CURLOPT_USERPWD, 'OI:z8BaDusT');
-	// send well formed request packet
-	curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: text/xml'));
-	curl_setopt($ch, CURLOPT_POSTFIELDS, $_POST['req'] );
-	//curl_setopt($ch, CURLOPT_VERBOSE, true);
-	$data = curl_exec($ch);
-	curl_close($ch);
-	
-	echo json_encode((array) simplexml_load_string($data));
-	
+
+require __DIR__ . '/bootstrap.php';
+
+header('Content-Type: application/json');
+
+if (empty($_POST['req'])) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Missing request payload']);
+    exit;
 }
+
+$config = rts_load_config();
+$data = rts_post_xml((string) $_POST['req'], $config);
+$parsed = simplexml_load_string($data);
+
+if ($parsed === false) {
+    http_response_code(502);
+    echo json_encode(['error' => 'Invalid RTS response']);
+    exit;
+}
+
+echo json_encode($parsed);

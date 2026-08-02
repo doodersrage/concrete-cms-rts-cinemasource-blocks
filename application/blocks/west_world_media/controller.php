@@ -1,365 +1,463 @@
 <?php
+
 namespace Application\Block\WestWorldMedia;
 
-use Illuminate\Filesystem\Filesystem;
+use Concrete\Core\Block\BlockController;
+use Concrete\Core\File\File;
+use Concrete\Core\File\Importer;
 
-use \Concrete\Core\Block\BlockController;
-use Package;
-use Core;
-use View;
-use Page;
-use URL;
-use Loader;
-use BlockType;
-use FilePermissions;
-use FileImporter;
+class Controller extends BlockController
+{
+    protected $btTable = 'btWestWorldMedia';
+    protected $btDescription = 'Gathers Cinema Source listing feed and converts it to JSON for use in scripting.';
+    protected $btName = 'West World Media';
+    protected $btInterfaceWidth = '600';
+    protected $btInterfaceHeight = '600';
 
-class Controller extends BlockController{
-	
-	var $pobj, $movie_listing;
-	var $year_walk = 0;
-	
-	protected $btDescription = "Gathers West World Media listing feed then converts it to JSON for use in scripting.";
-	protected $btName = "West World Media";
-	protected $btInterfaceWidth = "350";
-	protected $btInterfaceHeight = "300";
+    public $cinemaSourceApiKey;
+    public $cinemaSourceApiVersion;
+    public $cinemaSourceHouseId;
+    public $rtsHost;
+    public $rtsUsername;
+    public $rtsPassword;
+    public $rtsUseSandbox;
+    public $processCompleteUrl;
+    public $returnUrl;
 
-	private function get_data($url) {
-	  $ch = curl_init();
-	  $timeout = 10;
-	  //curl_setopt($ch, CURLOPT_INTERFACE, "208.109.184.101");
-	  //curl_setopt( $ch, CURLOPT_HTTPHEADER, array("REMOTE_ADDR: 208.109.186.158", "HTTP_X_FORWARDED_FOR: 208.109.186.158"));
-	  //curl_setopt($ch, CURLOPT_HTTPHEADER, array('Host: 208.109.186.158'));
-	  curl_setopt($ch, CURLOPT_URL, $url);
-	  curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-	  curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
-	  //curl_setopt($ch, CURLOPT_VERBOSE, true);
-	  $data = curl_exec($ch);
-	  curl_close($ch);
-	  return $data;
-	}
-	
-	// gather movie data from WWM
-	private function getMovieDataWWM($movie_id){
-		
-		// gather movie data
-		$movie_data = json_decode(json_encode((array) simplexml_load_string($this->get_data('http://webservice.cinema-source.com/3.8/?apikey=THBMB&query=movie&stars=yes&photos=all&movie_id='.trim($movie_id)))), 1);
+    public function getBlockTypeDescription()
+    {
+        return t('Integrates Cinema Source showtime data with RTS POS ticketing.');
+    }
 
-		return $movie_data['movie'];
-	}
-	
-	// pull location listing data
-	private function getWWMListingData(){
-		
-		// configure show dates
-		$startDate = Date('Ymd');
-		$endDate = Date('Ymd', strtotime('+4 months'));
-		
-		// gather movie data
-		$movie_data = $this->get_data('http://webservice.cinema-source.com/3.8/?apikey=YOUAPIKEY&query=theater&schedule=yes&house_id=34510&sd=yes&showdate='.$startDate.'&enddate='.$endDate);
+    public function save($args)
+    {
+        $args['cinemaSourceApiVersion'] = trim($args['cinemaSourceApiVersion'] ?? '4.0') ?: '4.0';
+        $args['rtsUseSandbox'] = !empty($args['rtsUseSandbox']) ? 1 : 0;
+        parent::save($args);
+    }
 
-		return $movie_data;					
-	}
-	
-	// pull location listing data
-	private function getRTSListing(){
-				
-		// gather movie data
-		$movie_data = json_decode(json_encode((array) simplexml_load_string($this->get_data('http://72352.formovietickets.com:2235/showtimes.xml'))), 1);
+    public function view()
+    {
+        $this->buildListing();
+    }
 
-		return $movie_data;					
-	}
+    private function getSiteConfig(): array
+    {
+        $path = DIR_APPLICATION . '/config/cinema_source.php';
+        if (file_exists($path)) {
+            $config = require $path;
+            if (is_array($config)) {
+                return $config;
+            }
+        }
 
-	// get data from RTS
-	private function getRTSData($packet=''){
-		
-		// generate XML request packet
-		if($packet == 'ShowTimeXml'){
-			$xml = new \SimpleXMLElement('<Request/>');
-			$xml->addChild('Version', 1);
-			$xml->addChild('Command', 'ShowTimeXml');
-			$xml->addChild('ShowAvalTickets', 1);
-			$xml->addChild('ShowSales', 1);
-			$xml->addChild('ShowSaleLinks', 1);
-			$packet = $xml->asXML();
-		}
-		
-		//die($xml->asXML());
-		
-		$ch = curl_init();
-		$timeout = 10;
-		curl_setopt($ch, CURLOPT_SSLVERSION, 1);
-		curl_setopt($ch, CURLOPT_URL, 'https://5.formovietickets.com/Data.ASP');
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_PORT, 2235);
-		curl_setopt($ch, CURLOPT_POST, true );
-		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
-		// authenticate user
-		curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC ) ;
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-		curl_setopt($ch, CURLOPT_USERPWD, 'test:test');
-		// send well formed request packet
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: text/xml'));
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $packet );
-		//curl_setopt($ch, CURLOPT_VERBOSE, true);
-		$data = curl_exec($ch);
-		curl_close($ch);
+        return [];
+    }
 
-		return $data;
-	}
-		
-	public function view(){ 
-		// build listing data from West World Media provided XML feed
-		$this->buildListing();
-	}
-	
-	// look up available ticketing options
-	private function ticketLookup($rtsListing, $ticketID){
-		foreach($rtsListing['ShowSchedule']['Tickets']['Ticket'] as $ticket){
-			if($ticket['Code'] == $ticketID){
-				return $ticket;
-			}
-		}
-	}
-	
-	// generate movie listing data
-	private function buildListing(){
-		// link any necessary javascript files
-		$html = Loader::helper('html');
-		$f = Loader::helper('concrete/file');
-		$expensiveCache = \Core::make('cache/expensive');
+    private function getIntegrationConfig(): array
+    {
+        $site = $this->getSiteConfig();
 
-		// listing cache file
-		$listCacheFle = DIR_FILES_UPLOADED_STANDARD.'/listingcache.js';
-		
-		// init vars		
-		$movie_data_arr = array();
-		$sel_dates_arr = array();
-		$soon_dates_arr = array();
-		
-		//die($this->get_data('http://webservice.cinema-source.com/3.8/?apikey=THBMB&query=movie&movie_id=211358'));
-							
-		// retrieve cached values
-		$updated_listing = $expensiveCache->getItem('movieFeed');
-		//$updated_listing->clear();
-		$listCheck = $updated_listing;
-		$updated_listing = $updated_listing->get();
-		
-		//die($this->get_data('http://webservice.cinema-source.com/3.8/?apikey=THBMB&query=movie&search=AL13222'));
-		
-		// reload listing if cache is found to be empty
-		if($listCheck->isMiss()){
+        return [
+            'cinema_source' => [
+                'base_url' => $site['cinema_source']['base_url'] ?? 'https://webservice.cinema-source.com',
+                'api_version' => $this->cinemaSourceApiVersion ?: ($site['cinema_source']['api_version'] ?? '4.0'),
+                'api_key' => $this->cinemaSourceApiKey ?: ($site['cinema_source']['api_key'] ?? ''),
+                'house_id' => $this->cinemaSourceHouseId ?: ($site['cinema_source']['house_id'] ?? ''),
+            ],
+            'rts' => [
+                'host' => $this->rtsHost ?: ($site['rts']['host'] ?? '72352.formovietickets.com'),
+                'port' => (int) ($site['rts']['port'] ?? 2235),
+                'username' => $this->rtsUsername ?: ($site['rts']['username'] ?? ''),
+                'password' => $this->rtsPassword ?: ($site['rts']['password'] ?? ''),
+                'use_sandbox' => (bool) ($this->rtsUseSandbox ?? ($site['rts']['use_sandbox'] ?? false)),
+                'sandbox_host' => $site['rts']['sandbox_host'] ?? '5.formovietickets.com',
+                'sandbox_username' => $site['rts']['sandbox_username'] ?? 'test',
+                'sandbox_password' => $site['rts']['sandbox_password'] ?? 'test',
+                'verify_ssl' => $site['rts']['verify_ssl'] ?? false,
+            ],
+            'site' => [
+                'process_complete_url' => $this->processCompleteUrl ?: ($site['site']['process_complete_url'] ?? ''),
+                'return_url' => $this->returnUrl ?: ($site['site']['return_url'] ?? ''),
+                'conv_fee' => (float) ($site['site']['conv_fee'] ?? 1.35),
+            ],
+        ];
+    }
 
-			// gather theater movie listing
-			$rtsListing = json_decode(json_encode((array) simplexml_load_string($this->getRTSData('ShowTimeXml'))), 1);
-			$listing = $this->getWWMListingData();
-			//$rtsListing = $this->getRTSListing();
-			
-			// 11-29-2013 force reload if listing data if blank
-	//		if(empty($listing)){
-//				$this->buildListing();
-//			}
-			
-			// convert to PHP array
-			$listing = json_decode(json_encode((array) simplexml_load_string($listing)), 1);
+    private function buildCinemaSourceUrl(array $config, array $params): string
+    {
+        $query = array_merge(['apikey' => $config['api_key']], $params);
 
-			// store movie data
-			$movie_listing = $listing['house']['schedule']['movie'];
-			$updated_listing = $movie_listing;
+        return rtrim($config['base_url'], '/')
+            . '/'
+            . rawurlencode($config['api_version'])
+            . '/?'
+            . http_build_query($query);
+    }
 
-			// walk through all movies per location
-			foreach($movie_listing as $movie){
-				
-				// check for movie tickets film code
-				if(!empty($movie['movie_id'])){
-					// gather movie data
-					$movie_data = $expensiveCache->getItem('movieData'.$movie['movie_id']);
-					// store in cache if not found
-					if ($movie_data->isMiss()) {
-						$movie_data->lock();
-						$movie_data_new = $this->getMovieDataWWM($movie['movie_id']);
-						$movie_data->set($movie_data_new,86400);
-					}
-					$movie_data = $movie_data->get();
-					
-					// add to movie data array
-					$movie_data_arr[$movie['movie_id']] = $movie_data;
+    private function getData(string $url): string
+    {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        $data = curl_exec($ch);
+        curl_close($ch);
 
-					// generate selectable date hash
-					// check for show within assigned RTS showtimes
-					foreach($rtsListing['ShowSchedule']['Films']['Film'] as $film){
-						
-						// check cinema source film code vs stored RTS cinema source film code
-						if($film['CSCode'] == $movie['movie_id']){
-							
-							// check for single or multiple shows
-							$shows = array();
-							if(empty($film['Shows']['Show']['DT'])){
-								$shows = $film['Shows']['Show'];
-							} else {
-								$shows[0] = $film['Shows']['Show'];
-							}
-					
-							// add date/time values to selectable date hash
-							foreach($shows as $curShow){
-								// check for ticket internet availability
-								$tickets = array();
-								if(empty($curShow['TIs']['TI']['C'])){
-									$tickets = $curShow['TIs']['TI'];
-								} else {
-									$tickets[0] = $curShow['TIs']['TI'];
-								}
-								foreach($tickets as $TI){
-									$ticket = $this->ticketLookup($rtsListing, $TI['C']);
-									// store current showtimes
-									// convert date/time
-									$showDate = substr($curShow['DT'], 0, 8);
-									if(!empty($ticket) && empty($ticket['HideOnInternet'])){
-																				
-										if($movie['showtimes']['@attributes']){
-											$stDate = explode('/',$movie['showtimes']['@attributes']['date']);
-											$stDate = $stDate[2] . sprintf("%02d", $stDate[0]) . $stDate[1];
-											if($stDate == $showDate){
-												$sel_dates_arr[$movie['showtimes']['@attributes']['date']] = strtotime($movie['showtimes']['@attributes']['date']);
-											}
-										} else {
-											foreach($movie['showtimes'] as $curShowTime){
-												$stDate = explode('/',$curShowTime['@attributes']['date']);
-												$stDate = $stDate[2] . sprintf("%02d", $stDate[0]) . $stDate[1];
-												if($stDate == $showDate){
-													$sel_dates_arr[$curShowTime['@attributes']['date']] = strtotime($curShowTime['@attributes']['date']);
-												}
-											}
-										}
-										
-									// store upcoming showtimes
-									} elseif (count($tickets) == 1 && !empty($ticket) && $ticket['HideOnInternet'] == 1 && $ticket['Name'] == 'rSupersvr') {
-																				
-										if($movie['showtimes']['@attributes']){
-											$stDate = explode('/',$movie['showtimes']['@attributes']['date']);
-											$stDate = $stDate[2] . sprintf("%02d", $stDate[0]) . $stDate[1];
-											if($stDate == $showDate){
-												$soon_dates_arr[$movie['showtimes']['@attributes']['date']] = strtotime($movie['showtimes']['@attributes']['date']);
-											};
-										}
+        return $data !== false ? $data : '';
+    }
 
-									}
-								}
-							}
-						
-						}
-					
-					}
-	
-					//print_r($movie_data);
-					
-					// walk through movie data and save images to media library where needed
-					if($movie_data['photos']['photo'] || $movie_data['hiphotos']['photo']){
-						
-						// download image save to cache then delete
-						$myFile = ereg_replace("[^A-Za-z0-9-]", "_", trim($movie_data['name'])).'.jpg';
-						$myFile = preg_replace('/[_]+/', '_', $myFile);
-						
-						// check for existing poster file
-						$db = Loader::db();
-						$det = $db->GetRow('SELECT * FROM FileVersions WHERE fvIsApproved = 1 AND fvFilename = ? LIMIT 1', array($myFile));
-						if (!$det) {
-							
-							// pull remote file
-							if(count($movie_data['hiphotos']['photo']) > 1){
-								$imgLnk = $movie_data['hiphotos']['photo'][0];
-							} elseif($movie_data['hiphotos']['photo']){
-								$imgLnk = $movie_data['hiphotos']['photo'];
-							} elseif(count($movie_data['photos']['photo']) > 0) {
-								$imgLnk = $movie_data['photos']['photo'][0];
-							} elseif($movie_data['photos']['photo']) {
-								$imgLnk = $movie_data['photos']['photo'];
-							}
-							$new_image = $this->get_data($imgLnk);
-							
-							$myFileLocation = DIR_FILES_UPLOADED_STANDARD.'/cache/'.$myFile;
-							if(!file_exists($myFileLocation)){
-								$fh = fopen($myFileLocation, 'w');
-								$stringData = $new_image;
-								fwrite($fh, $stringData);
-								fclose($fh);
-							}
-														
-							if(!file_exists($myFileLocation) || filesize($myFileLocation) > 0){
-								$error = \Concrete\Core\File\Importer::E_PHP_FILE_ERROR_DEFAULT;
-								$fi = new \Concrete\Core\File\Importer();
-								$newFile = $fi->import($myFileLocation,$myFile);
-								if(!is_object($newFile)) {
-									$this->set('errorMessage', \Concrete\Core\File\Importer::getErrorMessage($error));  
-								}
-								
-								// delete cached file
-								unlink($myFileLocation);
-							}
-								
-							//echo $myFileLocation;
-//							echo $myFile;
-//							print_r($movie_data);
-//							die();
-						
-							$det = $db->GetRow('SELECT * FROM FileVersions WHERE fvIsApproved = 1 AND fvFilename = ? LIMIT 1', array($myFile));
-							$f = \File::getByID($det[fID]);
-							$fv = $f->getApprovedVersion();
-							$path = $fv->getRelativePath();
-						} else {
-							$f = \File::getByID($det[fID]);
-							$fv = $f->getApprovedVersion();
-							$path = $fv->getRelativePath();
-						}
-						
-						// update poster art to use local relative path
-						$movie_data_arr[$movie['movie_id']]['photos']['photo'] = $path;
-					} else {
-						$path = 'null';
-					}
-				}
-				
-			}
-			
-			// store queried show dates
-			$movieFeed = $expensiveCache->getItem('movieFeed');
-			// store in cache if not found
-			if ($movieFeed->isMiss()) {
-				$movieFeed->lock();
-				$movie_feed_new = $updated_listing;
-				$movieFeed->set($movie_feed_new,7200);
-			}
-			$movieFeed = $movieFeed->get();
-										
-			// convert to JSON
-			asort($sel_dates_arr);
-			$sel_dates_arr = json_encode($sel_dates_arr);
-			asort($soon_dates_arr);
-			$soon_dates_arr = json_encode($soon_dates_arr);
-			$updated_listing = json_encode($updated_listing);
-			$rtsListing = json_encode($rtsListing);
-			$movie_data_arr = json_encode($movie_data_arr);
-			
-			$final_listing = 'var dateOpts = ' . $sel_dates_arr . ';'."\n\n";
-			$final_listing .= 'var soonDateOpts = ' . $soon_dates_arr . ';'."\n\n";
-			$final_listing .= 'var listingData = ' . $updated_listing . ';'."\n\n";
-			$final_listing .= 'var rtsListingData = ' . $rtsListing . ';'."\n\n";
-			$final_listing .= 'var movieData = ' . $movie_data_arr . ';';
-			
-			// save as static file
-			touch($listCacheFle);
-			$fh = fopen($listCacheFle, 'w');
-			fwrite($fh, $final_listing);
-			fclose($fh);
+    private function xmlToArray(string $xml): array
+    {
+        if ($xml === '') {
+            return [];
+        }
 
-		}
-		
-		// add json variables to footer
-		$this->addFooterItem($html->javascript(DIR_REL.'/application/files/listingcache.js'));
-		
-		// transfer usable variables
-		//$this->set('jsAPI', $updated_listing);
-	}
-	
+        $element = simplexml_load_string($xml);
+        if ($element === false) {
+            return [];
+        }
+
+        return json_decode(json_encode($element), true) ?: [];
+    }
+
+    private function getMovieDataWWM(string $movieId, array $config): array
+    {
+        $url = $this->buildCinemaSourceUrl($config, [
+            'query' => 'movie',
+            'stars' => 'yes',
+            'photos' => 'all',
+            'movie_id' => trim($movieId),
+        ]);
+        $movieData = $this->xmlToArray($this->getData($url));
+
+        return $movieData['movie'] ?? [];
+    }
+
+    private function getWWMListingData(array $config): string
+    {
+        $startDate = date('Ymd');
+        $endDate = date('Ymd', strtotime('+4 months'));
+
+        return $this->getData($this->buildCinemaSourceUrl($config, [
+            'query' => 'theater',
+            'schedule' => 'yes',
+            'house_id' => $config['house_id'],
+            'sd' => 'yes',
+            'showdate' => $startDate,
+            'enddate' => $endDate,
+        ]));
+    }
+
+    private function getRtsEndpoint(array $rtsConfig): array
+    {
+        if (!empty($rtsConfig['use_sandbox'])) {
+            return [
+                'host' => $rtsConfig['sandbox_host'],
+                'username' => $rtsConfig['sandbox_username'],
+                'password' => $rtsConfig['sandbox_password'],
+            ];
+        }
+
+        return [
+            'host' => $rtsConfig['host'],
+            'username' => $rtsConfig['username'],
+            'password' => $rtsConfig['password'],
+        ];
+    }
+
+    private function getRTSData(array $rtsConfig, string $packet = ''): string
+    {
+        if ($packet === 'ShowTimeXml') {
+            $xml = new \SimpleXMLElement('<Request/>');
+            $xml->addChild('Version', '1');
+            $xml->addChild('Command', 'ShowTimeXml');
+            $xml->addChild('ShowAvalTickets', '1');
+            $xml->addChild('ShowSales', '1');
+            $xml->addChild('ShowSaleLinks', '1');
+            $packet = $xml->asXML();
+        }
+
+        $endpoint = $this->getRtsEndpoint($rtsConfig);
+        $port = (int) ($rtsConfig['port'] ?? 2235);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://' . $endpoint['host'] . '/Data.ASP');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_PORT, $port);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, !empty($rtsConfig['verify_ssl']));
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, !empty($rtsConfig['verify_ssl']) ? 2 : 0);
+        curl_setopt($ch, CURLOPT_USERPWD, $endpoint['username'] . ':' . $endpoint['password']);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: text/xml']);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $packet);
+        $data = curl_exec($ch);
+        curl_close($ch);
+
+        return $data !== false ? $data : '';
+    }
+
+    private function ticketLookup(array $rtsListing, $ticketID): ?array
+    {
+        if (empty($rtsListing['ShowSchedule']['Tickets']['Ticket'])) {
+            return null;
+        }
+
+        $tickets = $rtsListing['ShowSchedule']['Tickets']['Ticket'];
+        if (isset($tickets['Code'])) {
+            $tickets = [$tickets];
+        }
+
+        foreach ($tickets as $ticket) {
+            if (($ticket['Code'] ?? null) == $ticketID) {
+                return $ticket;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeList($value): array
+    {
+        if (empty($value)) {
+            return [];
+        }
+
+        if (isset($value[0]) || !is_array($value)) {
+            return (array) $value;
+        }
+
+        return [$value];
+    }
+
+    private function findPosterFile(string $filename): ?File
+    {
+        $db = $this->app->make('database/connection');
+        $row = $db->fetchAssoc(
+            'SELECT fID FROM FileVersions WHERE fvIsApproved = 1 AND fvFilename = ? LIMIT 1',
+            [$filename]
+        );
+
+        if (!$row || empty($row['fID'])) {
+            return null;
+        }
+
+        $file = File::getByID((int) $row['fID']);
+
+        return $file instanceof File ? $file : null;
+    }
+
+    private function importPoster(string $imageUrl, string $filename): ?string
+    {
+        $imageData = $this->getData($imageUrl);
+        if ($imageData === '') {
+            return null;
+        }
+
+        $cacheDir = DIR_FILES_UPLOADED_STANDARD . '/cache';
+        if (!is_dir($cacheDir)) {
+            mkdir($cacheDir, 0755, true);
+        }
+
+        $cachePath = $cacheDir . '/' . $filename;
+        file_put_contents($cachePath, $imageData);
+
+        if (!file_exists($cachePath) || filesize($cachePath) === 0) {
+            return null;
+        }
+
+        $importer = $this->app->make(Importer::class);
+        if (method_exists($importer, 'importLocal')) {
+            $newFile = $importer->importLocal($cachePath, $filename);
+        } else {
+            $newFile = $importer->import($cachePath, $filename);
+        }
+
+        @unlink($cachePath);
+
+        if (!$newFile instanceof File) {
+            return null;
+        }
+
+        $version = $newFile->getApprovedVersion();
+
+        return $version ? $version->getRelativePath() : null;
+    }
+
+    private function resolvePosterPath(array $movieData): ?string
+    {
+        $filename = preg_replace('/[^A-Za-z0-9-]+/', '_', trim($movieData['name'] ?? '')) . '.jpg';
+        $filename = preg_replace('/_+/', '_', $filename);
+
+        $existing = $this->findPosterFile($filename);
+        if ($existing instanceof File) {
+            $version = $existing->getApprovedVersion();
+
+            return $version ? $version->getRelativePath() : null;
+        }
+
+        $imgLnk = null;
+        $hiPhotos = $movieData['hiphotos']['photo'] ?? null;
+        $photos = $movieData['photos']['photo'] ?? null;
+
+        if (is_array($hiPhotos)) {
+            $imgLnk = $hiPhotos[0] ?? null;
+        } elseif (!empty($hiPhotos)) {
+            $imgLnk = $hiPhotos;
+        } elseif (is_array($photos)) {
+            $imgLnk = $photos[0] ?? null;
+        } elseif (!empty($photos)) {
+            $imgLnk = $photos;
+        }
+
+        if (empty($imgLnk)) {
+            return null;
+        }
+
+        return $this->importPoster($imgLnk, $filename);
+    }
+
+    private function buildListing(): void
+    {
+        $html = $this->app->make('helper/html');
+        $expensiveCache = $this->app->make('cache/expensive');
+        $integration = $this->getIntegrationConfig();
+        $cinemaConfig = $integration['cinema_source'];
+        $rtsConfig = $integration['rts'];
+
+        $listCacheFile = DIR_FILES_UPLOADED_STANDARD . '/listingcache.js';
+
+        $movieDataArr = [];
+        $selDatesArr = [];
+        $soonDatesArr = [];
+
+        $updatedListingItem = $expensiveCache->getItem('movieFeed');
+        $updatedListing = $updatedListingItem->get();
+
+        if ($updatedListingItem->isMiss()) {
+            $rtsListing = [];
+
+            if ($cinemaConfig['api_key'] === '' || $cinemaConfig['house_id'] === '') {
+                $this->set('errorMessage', t('Configure Cinema Source API credentials in the block or application/config/cinema_source.php.'));
+            } else {
+                $rtsListing = $this->xmlToArray($this->getRTSData($rtsConfig, 'ShowTimeXml'));
+                $listing = $this->xmlToArray($this->getWWMListingData($cinemaConfig));
+                $movieListing = $listing['house']['schedule']['movie'] ?? [];
+                if (isset($movieListing['movie_id'])) {
+                    $movieListing = [$movieListing];
+                }
+                $updatedListing = $movieListing;
+
+                foreach ($movieListing as $movie) {
+                    if (empty($movie['movie_id'])) {
+                        continue;
+                    }
+
+                    $movieId = $movie['movie_id'];
+                    $movieDataItem = $expensiveCache->getItem('movieData' . $movieId);
+                    if ($movieDataItem->isMiss()) {
+                        $movieDataItem->lock();
+                        $movieDataItem->set($this->getMovieDataWWM($movieId, $cinemaConfig), 86400);
+                    }
+                    $movieData = $movieDataItem->get();
+                    $movieDataArr[$movieId] = $movieData;
+
+                    foreach ($this->normalizeList($rtsListing['ShowSchedule']['Films']['Film'] ?? []) as $film) {
+                        if (($film['CSCode'] ?? null) != $movieId) {
+                            continue;
+                        }
+
+                        $shows = $this->normalizeList($film['Shows']['Show'] ?? []);
+                        if (isset($film['Shows']['Show']['DT'])) {
+                            $shows = [$film['Shows']['Show']];
+                        }
+
+                        foreach ($shows as $curShow) {
+                            $tickets = $this->normalizeList($curShow['TIs']['TI'] ?? []);
+                            if (isset($curShow['TIs']['TI']['C'])) {
+                                $tickets = [$curShow['TIs']['TI']];
+                            }
+
+                            foreach ($tickets as $ti) {
+                                $ticket = $this->ticketLookup($rtsListing, $ti['C'] ?? null);
+                                $showDate = substr((string) ($curShow['DT'] ?? ''), 0, 8);
+
+                                $showtimeEntries = $this->normalizeList($movie['showtimes'] ?? []);
+                                if (isset($movie['showtimes']['@attributes'])) {
+                                    $showtimeEntries = [$movie['showtimes']];
+                                }
+
+                                foreach ($showtimeEntries as $curShowTime) {
+                                    $dateAttr = $curShowTime['@attributes']['date'] ?? null;
+                                    if (!$dateAttr) {
+                                        continue;
+                                    }
+
+                                    $stDateParts = explode('/', $dateAttr);
+                                    if (count($stDateParts) !== 3) {
+                                        continue;
+                                    }
+
+                                    $stDate = $stDateParts[2] . sprintf('%02d', $stDateParts[0]) . $stDateParts[1];
+                                    if ($stDate !== $showDate) {
+                                        continue;
+                                    }
+
+                                    if (!empty($ticket) && empty($ticket['HideOnInternet'])) {
+                                        $selDatesArr[$dateAttr] = strtotime($dateAttr);
+                                    } elseif (count($tickets) === 1 && !empty($ticket) && ($ticket['HideOnInternet'] ?? null) == 1 && ($ticket['Name'] ?? '') === 'rSupersvr') {
+                                        $soonDatesArr[$dateAttr] = strtotime($dateAttr);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!empty($movieData['photos']['photo']) || !empty($movieData['hiphotos']['photo'])) {
+                        $path = $this->resolvePosterPath($movieData);
+                        if ($path) {
+                            $movieDataArr[$movieId]['photos']['photo'] = $path;
+                        }
+                    }
+                }
+
+                $movieFeedItem = $expensiveCache->getItem('movieFeed');
+                if ($movieFeedItem->isMiss()) {
+                    $movieFeedItem->lock();
+                    $movieFeedItem->set($updatedListing, 7200);
+                }
+
+                asort($selDatesArr);
+                asort($soonDatesArr);
+
+                $rtsConfigJs = json_encode([
+                    'reqUrl' => '/rts/req.php',
+                    'sessUrl' => '/rts/sess.php',
+                    'redirUrl' => '/rts/redir.php',
+                    'processCompleteUrl' => $integration['site']['process_complete_url'],
+                    'returnUrl' => $integration['site']['return_url'],
+                    'convFee' => $integration['site']['conv_fee'],
+                ], JSON_UNESCAPED_SLASHES);
+
+                $finalListing = 'var rtsConfig = ' . $rtsConfigJs . ";\n\n";
+                $finalListing .= 'var dateOpts = ' . json_encode($selDatesArr) . ";\n\n";
+                $finalListing .= 'var soonDateOpts = ' . json_encode($soonDatesArr) . ";\n\n";
+                $finalListing .= 'var listingData = ' . json_encode($updatedListing) . ";\n\n";
+                $finalListing .= 'var rtsListingData = ' . json_encode($rtsListing) . ";\n\n";
+                $finalListing .= 'var movieData = ' . json_encode($movieDataArr) . ';';
+
+                if (!is_dir(dirname($listCacheFile))) {
+                    mkdir(dirname($listCacheFile), 0755, true);
+                }
+                file_put_contents($listCacheFile, $finalListing);
+            }
+        }
+
+        $this->addFooterItem($html->javascript(DIR_REL . '/application/files/listingcache.js'));
+    }
 }

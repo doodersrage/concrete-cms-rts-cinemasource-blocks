@@ -1,1 +1,3 @@
-<p>Gathers West World Media listing feed then converts it to JSON for use in scripting.</p>
+<?php defined('C5_EXECUTE') or die('Access Denied.');
+
+require dirname(__FILE__) . '/edit.php';

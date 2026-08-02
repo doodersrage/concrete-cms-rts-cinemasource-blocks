@@ -15,6 +15,8 @@ function getParameterByName(name, url) {
 
 $(function(){
 	'use strict';
+
+	var cfg = (typeof rtsConfig !== 'undefined') ? rtsConfig : {};
 	
 	orderSys = {
 		maxTickets: [0,1,2,3,4,5,6,7,8,9,10],
@@ -24,7 +26,7 @@ $(function(){
 		selTickets: {},
 		selTicketsQty: [],
 		customerInfo: {},
-		convFee: 1.35,
+		convFee: cfg.convFee || 1.35,
 		orderSum: 0,
 		email: '',
 		defMaxSales: 64,
@@ -113,15 +115,15 @@ $(function(){
 				hcp += '<StreetAddress>'+customerInfo.address+'</StreetAddress>';
 				hcp += '<ZipCode>'+customerInfo.zip+'</ZipCode>';
 				hcp += '<CustomerName>'+customerInfo.fullName+'</CustomerName>';
-				hcp += '<ProcessCompleteUrl>'+encodeURI('https://beachmoviebistro.com/rts/procComp.php')+'</ProcessCompleteUrl>';
-				hcp += '<ReturnUrl>'+encodeURI('https://beachmoviebistro.com/showtimes')+'</ReturnUrl>';
+				hcp += '<ProcessCompleteUrl>'+encodeURI(cfg.processCompleteUrl || (window.location.origin + '/rts/procComp.php'))+'</ProcessCompleteUrl>';
+				hcp += '<ReturnUrl>'+encodeURI(cfg.returnUrl || (window.location.origin + '/showtimes'))+'</ReturnUrl>';
 				hcp += '</Packet>';
 				hcp += '</Data>';
 				hcp += '</Request>';
 
 				// send xhr request
 				$.ajax({
-				  url: '/rts/req.php',
+				  url: cfg.reqUrl || '/rts/req.php',
 				  method: 'post',
 				  data: {'req':hcp}
 				}).done(function(data) {
@@ -149,12 +151,12 @@ $(function(){
 						
 						// save transaction data to local session variable for retrieval after payment
 						$.ajax({
-						  url: '/rts/sess.php',
+						  url: cfg.sessUrl || '/rts/sess.php',
 						  method: 'post',
 						  data: {'method':'set','data':order}
 						}).done(function(data) {
 							// redirect script to payment processor
-							window.location = '/rts/redir.php?RedirectUrl=' + res.Packet.CreatePayment.RedirectUrl + '&paymentID=' + res.Packet.CreatePayment.PostData + '&TransactionId=' + res.Packet.CreatePayment.TransactionId;
+							window.location = (cfg.redirUrl || '/rts/redir.php') + '?RedirectUrl=' + res.Packet.CreatePayment.RedirectUrl + '&paymentID=' + res.Packet.CreatePayment.PostData + '&TransactionId=' + res.Packet.CreatePayment.TransactionId;
 						});
 					
 					}
@@ -395,7 +397,7 @@ $(function(){
 		payResults: function(){
 			
 			$.ajax({
-			  url: '/rts/sess.php',
+			  url: cfg.sessUrl || '/rts/sess.php',
 			  method: 'post',
 			  data: {'method':'get'}
 			}).done(function(data) {
@@ -472,7 +474,7 @@ $(function(){
 	} else {
 		// prime session state if inital page load
 		$.ajax({
-		  url: '/rts/sess.php',
+		  url: cfg.sessUrl || '/rts/sess.php',
 		  method: 'post',
 		  data: {'method':'set','data':{}}
 		});
