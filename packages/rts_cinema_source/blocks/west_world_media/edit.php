@@ -1,1 +1,1 @@
-<p><?php echo t('Gathers Cinema Source listing feed and converts it to JSON for use in scripting. Configure API credentials in Dashboard → RTS Cinema Source.'); ?></p>
+<p><?php echo t('This block is deprecated. Add any other cinema block instead — listing cache and checkout load automatically.'); ?></p>

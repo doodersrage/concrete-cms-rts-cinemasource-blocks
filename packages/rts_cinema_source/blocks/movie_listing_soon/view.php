@@ -12,3 +12,9 @@ defined('C5_EXECUTE') or die("Access Denied.");
     <div class="listing-output">
     </div>
 </div>
+<?php
+View::element('cinema_listing_footer', [
+    'errorMessage' => $errorMessage ?? null,
+    'includeCheckoutModal' => $includeCheckoutModal ?? false,
+], 'rts_cinema_source');
+?>

@@ -21,3 +21,9 @@ defined('C5_EXECUTE') or die("Access Denied.");
     <span class="sr-only">Next</span>
   </a>
 </div>
+<?php
+View::element('cinema_listing_footer', [
+    'errorMessage' => $errorMessage ?? null,
+    'includeCheckoutModal' => $includeCheckoutModal ?? false,
+], 'rts_cinema_source');
+?>

@@ -13,7 +13,7 @@ class Controller extends Package
 
     protected $appVersionRequired = '9.0.0';
 
-    protected $pkgVersion = '2.0.0';
+    protected $pkgVersion = '2.1.0';
 
     protected $pkgAutoloaderRegistries = [
         'src' => 'RtsCinemaSource',
@@ -47,6 +47,10 @@ class Controller extends Package
             return new \RtsCinemaSource\Service\RtsClient();
         });
 
+        $this->app->singleton(\RtsCinemaSource\Service\ListingBootstrap::class, function ($app) {
+            return new \RtsCinemaSource\Service\ListingBootstrap($app);
+        });
+
         $router = $this->app->make('router');
         (new RouteList())->loadRoutes($router);
     }
@@ -55,7 +59,6 @@ class Controller extends Package
     {
         foreach (
             [
-                'west_world_media',
                 'movie_listing',
                 'movie_listing_soon',
                 'movie_gallery',

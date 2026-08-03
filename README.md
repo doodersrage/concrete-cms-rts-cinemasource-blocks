@@ -7,10 +7,11 @@ Concrete CMS package for **Cinema Source (Webedia)** showtime data and **RTS POS
 1. Copy the `packages/rts_cinema_source` directory into your Concrete site's `packages/` folder.
 2. In the Concrete dashboard, go to **Extend → Add Functionality** and install **RTS Cinema Source**.
 3. Open **Dashboard → RTS Cinema Source** and enter your Cinema Source and RTS credentials.
-4. Add blocks to your pages:
-   - **West World Media** — required on any page that uses the other blocks (builds listing cache + checkout modal)
+4. Add any cinema block to your pages — listing cache, checkout modal, and ticket scripts load automatically:
    - **Movie Listing** / **Movie Gallery** — current showtimes
    - **Movie Listing Soon** / **Movie Gallery Soon** — coming soon
+
+No separate data block is required. The West World Media block is kept only for legacy installs.
 
 ## Package structure
 

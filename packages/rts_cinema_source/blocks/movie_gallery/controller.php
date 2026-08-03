@@ -3,9 +3,12 @@
 namespace Concrete\Package\RtsCinemaSource\Block\MovieGallery;
 
 use Concrete\Core\Block\BlockController;
+use RtsCinemaSource\Block\BootstrapsCinemaListing;
 
 class Controller extends BlockController
 {
+    use BootstrapsCinemaListing;
+
     protected $btDescription = 'Movie gallery block for use with Cinema Cafe and West World Media movie listings.';
     protected $btName = 'Movie Gallery';
     protected $btInterfaceWidth = '350';
@@ -26,5 +29,6 @@ class Controller extends BlockController
 
     public function view()
     {
+        $this->bootstrapCinemaListing();
     }
 }
