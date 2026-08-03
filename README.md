@@ -49,8 +49,9 @@ The legacy `/rts/*.php` scripts are replaced by package routes:
 | `GET /api/rts_cinema_source/redirect` | Payment processor redirect |
 | `POST /api/rts_cinema_source/complete` | Payment callback + ticket purchase |
 | `GET /api/rts_cinema_source/barcode` | Ticket barcode image |
+| `GET /api/rts_cinema_source/listingcache.js` | Generated listing + checkout config for front-end JavaScript |
 
-The West World Media block writes these URLs into `listingcache.js` as `rtsConfig` for front-end checkout JavaScript.
+Display blocks load `listingcache.js` from that route. It exposes `rtsConfig` and related globals for checkout JavaScript.
 
 ## Cinema Source API
 

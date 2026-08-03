@@ -29,5 +29,9 @@ class RouteList implements RouteListInterface
             '/api/rts_cinema_source/barcode',
             'RtsCinemaSource\Api\Controller\BarcodeController::render'
         );
+        $router->get(
+            '/api/rts_cinema_source/listingcache.js',
+            'RtsCinemaSource\Api\Controller\ListingCacheController::render'
+        );
     }
 }

@@ -5,8 +5,11 @@ namespace RtsCinemaSource\Service;
 use Concrete\Core\Application\Application;
 use Concrete\Core\Block\BlockController;
 use Concrete\Core\File\File;
-use Concrete\Core\File\Importer;
+use Concrete\Core\File\Import\FileImporter;
+use Concrete\Core\File\Import\ImportException;
+use Concrete\Core\File\Incoming;
 use Concrete\Core\Package\Package;
+use Concrete\Core\Support\Facade\Url;
 
 class ListingBootstrap
 {
@@ -51,12 +54,12 @@ class ListingBootstrap
         $block->addFooterItem($html->css($assetPath . '/view.css'));
         $block->addFooterItem($html->javascript($assetPath . '/js/modal.js'));
         $block->addFooterItem($html->javascript($assetPath . '/js/script.js'));
-        $block->addFooterItem($html->javascript(DIR_REL . '/application/files/listingcache.js'));
+        $block->addFooterItem($html->javascript((string) Url::to('/api/rts_cinema_source/listingcache.js')));
 
         self::$assetsRegistered = true;
     }
 
-    protected function ensureListingCache(): ?string
+    public function ensureListingCache(): ?string
     {
         $expensiveCache = $this->app->make('cache/expensive');
         $integration = $this->app->make(IntegrationConfig::class);
@@ -66,10 +69,9 @@ class ListingBootstrap
         $cinemaConfig = $all['cinema_source'];
         $rtsConfig = $all['rts'];
 
-        $listCacheFile = DIR_FILES_UPLOADED_STANDARD . '/listingcache.js';
-        $updatedListingItem = $expensiveCache->getItem('movieFeed');
+        $listingCacheItem = $expensiveCache->getItem('listingCacheJs');
 
-        if (!$updatedListingItem->isMiss()) {
+        if (!$listingCacheItem->isMiss()) {
             return null;
         }
 
@@ -189,12 +191,22 @@ class ListingBootstrap
         $finalListing .= 'var rtsListingData = ' . json_encode($rtsListing) . ";\n\n";
         $finalListing .= 'var movieData = ' . json_encode($movieDataArr) . ';';
 
-        if (!is_dir(dirname($listCacheFile))) {
-            mkdir(dirname($listCacheFile), 0755, true);
-        }
-        file_put_contents($listCacheFile, $finalListing);
+        $listingCacheItem->lock();
+        $listingCacheItem->set($finalListing, 7200);
 
         return null;
+    }
+
+    public function getListingCacheScript(): ?string
+    {
+        $listingCacheItem = $this->app->make('cache/expensive')->getItem('listingCacheJs');
+        if ($listingCacheItem->isMiss()) {
+            return null;
+        }
+
+        $content = $listingCacheItem->get();
+
+        return is_string($content) && $content !== '' ? $content : null;
     }
 
     protected function getCheckoutAssetPath(): string
@@ -311,34 +323,30 @@ class ListingBootstrap
             return null;
         }
 
-        $cacheDir = DIR_FILES_UPLOADED_STANDARD . '/cache';
-        if (!is_dir($cacheDir)) {
-            mkdir($cacheDir, 0755, true);
-        }
+        $incoming = $this->app->make(Incoming::class);
+        $incomingFilesystem = $incoming->getIncomingFilesystem();
+        $incomingPath = $incoming->getIncomingPath();
+        $incomingFile = $incomingPath . '/' . $filename;
 
-        $cachePath = $cacheDir . '/' . $filename;
-        file_put_contents($cachePath, $imageData);
-
-        if (!file_exists($cachePath) || filesize($cachePath) === 0) {
+        try {
+            $incomingFilesystem->write($incomingFile, $imageData);
+        } catch (\Throwable $e) {
             return null;
         }
 
-        $importer = $this->app->make(Importer::class);
-        if (method_exists($importer, 'importLocal')) {
-            $newFile = $importer->importLocal($cachePath, $filename);
-        } else {
-            $newFile = $importer->import($cachePath, $filename);
-        }
-
-        @unlink($cachePath);
-
-        if (!$newFile instanceof File) {
+        if (!$incomingFilesystem->has($incomingFile) || $incomingFilesystem->getSize($incomingFile) === 0) {
             return null;
         }
 
-        $version = $newFile->getApprovedVersion();
+        $fileImporter = $this->app->make(FileImporter::class);
 
-        return $version ? $version->getRelativePath() : null;
+        try {
+            $fileVersion = $fileImporter->importFromIncoming($filename, $filename);
+        } catch (ImportException $e) {
+            return null;
+        }
+
+        return $fileVersion->getRelativePath();
     }
 
     protected function resolvePosterPath(array $movieData): ?string

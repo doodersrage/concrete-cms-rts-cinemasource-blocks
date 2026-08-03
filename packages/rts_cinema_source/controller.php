@@ -13,7 +13,7 @@ class Controller extends Package
 
     protected $appVersionRequired = '9.0.0';
 
-    protected $pkgVersion = '2.1.0';
+    protected $pkgVersion = '2.1.2';
 
     protected $pkgAutoloaderRegistries = [
         'src' => 'RtsCinemaSource',
