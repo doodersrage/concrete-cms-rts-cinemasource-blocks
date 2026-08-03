@@ -1,4 +1,4 @@
-# concrete57-rts-cinemasource-blocks
+# concrete-cms-rts-cinemasource-blocks
 
 Concrete CMS package for **Cinema Source (Webedia)** showtime data and **RTS POS** online ticketing.
 
@@ -58,12 +58,6 @@ https://webservice.cinema-source.com/{version}/?apikey={key}&query=...
 ```
 
 Default API version is **4.0** (configure the version assigned by Webedia).
-
-## Legacy install method
-
-The `application/` and `rts/` directories at the repository root are **deprecated** and kept for reference only. New installs should use the package above.
-
-A Next.js port is also available separately at `../next-js-cinemasource`.
 
 ## License
 
